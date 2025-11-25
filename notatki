@@ -1,0 +1,217 @@
+Plik zbior.h
+---------------------------------
+#pragma once
+#include <vector>
+#include <cstddef>
+#include <cassert>
+
+class Zbior
+{
+    size_t m_liczbaElementow = 0;
+    double* m_elementy = nullptr;
+    double m_dolnaGranica = 0;
+    double m_gornaGranica = 0;
+
+    void alokuj(int);
+    void zwolnij();
+
+public:
+
+    // --- Konstruktor argumentowy ---
+    Zbior(size_t liczElem, double dGran, double gGran);
+
+    // --- Destruktor ---
+    ~Zbior() { zwolnij(); }
+
+    // ===========================================================
+    // 1) Konwersja nieformalna → std::vector<double>
+    // ===========================================================
+    operator std::vector<double>() const {
+        return std::vector<double>(m_elementy, m_elementy + m_liczbaElementow);
+    }
+
+    // ===========================================================
+    // 2) operator += (dodaje n nowych losowych elementów)
+    // ===========================================================
+    Zbior& operator+=(int n);
+
+    // ===========================================================
+    // 3) Operator przenoszenia (move)
+    //    Jawnie wykluczamy kopiowanie
+    // ===========================================================
+
+    Zbior(Zbior&& other) noexcept;            // move ctor
+    Zbior& operator=(Zbior&& other) noexcept; // move assign
+
+    Zbior(const Zbior&) = delete;             // blokada kopiowania
+    Zbior& operator=(const Zbior&) = delete;  // blokada kopiowania
+
+    // Dostęp pomocniczy
+    size_t size() const { return m_liczbaElementow; }
+    double operator[](size_t i) const { return m_elementy[i]; }
+};
+
+Plik zbior.cpp
+----------------------------------------------------
+#include "zbior.h"
+#include <new>
+#include <random>
+#include <cassert>
+
+// ---------------------------------------------------------------
+void Zbior::alokuj(int n)
+{
+    assert(n > 0);
+    m_elementy = new(std::nothrow) double[n]{};
+    m_liczbaElementow = n;
+}
+
+void Zbior::zwolnij()
+{
+    delete[] m_elementy;
+    m_elementy = nullptr;
+    m_liczbaElementow = 0;
+}
+
+// ---------------------------------------------------------------
+Zbior::Zbior(size_t liczElem, double dGran, double gGran)
+    : m_dolnaGranica(dGran), m_gornaGranica(gGran)
+{
+    alokuj(liczElem);
+    std::uniform_real_distribution<double> zakres(dGran, gGran);
+    std::random_device generator;
+
+    for (size_t i = 0; i < liczElem; i++)
+        m_elementy[i] = zakres(generator);
+}
+
+// ---------------------------------------------------------------
+// 2) operator +=
+// ---------------------------------------------------------------
+Zbior& Zbior::operator+=(int n)
+{
+    assert(n >= 0);
+
+    if (n == 0)
+        return *this;
+
+    size_t nowy_rozmiar = m_liczbaElementow + n;
+    double* nowe = new double[nowy_rozmiar];
+
+    // kopiowanie starych
+    for (size_t i = 0; i < m_liczbaElementow; i++)
+        nowe[i] = m_elementy[i];
+
+    // losowanie nowych
+    std::uniform_real_distribution<double> zakres(m_dolnaGranica, m_gornaGranica);
+    std::random_device gen;
+
+    for (size_t i = m_liczbaElementow; i < nowy_rozmiar; i++)
+        nowe[i] = zakres(gen);
+
+    delete[] m_elementy;
+    m_elementy = nowe;
+    m_liczbaElementow = nowy_rozmiar;
+
+    return *this;
+}
+
+// ---------------------------------------------------------------
+// 3) Move constructor
+// ---------------------------------------------------------------
+Zbior::Zbior(Zbior&& other) noexcept
+{
+    m_elementy = other.m_elementy;
+    m_liczbaElementow = other.m_liczbaElementow;
+    m_dolnaGranica = other.m_dolnaGranica;
+    m_gornaGranica = other.m_gornaGranica;
+
+    other.m_elementy = nullptr;
+    other.m_liczbaElementow = 0;
+}
+
+// ---------------------------------------------------------------
+// 3) Move assignment
+// ---------------------------------------------------------------
+Zbior& Zbior::operator=(Zbior&& other) noexcept
+{
+    if (this != &other)
+    {
+        zwolnij();
+
+        m_elementy = other.m_elementy;
+        m_liczbaElementow = other.m_liczbaElementow;
+        m_dolnaGranica = other.m_dolnaGranica;
+        m_gornaGranica = other.m_gornaGranica;
+
+        other.m_elementy = nullptr;
+        other.m_liczbaElementow = 0;
+    }
+    return *this;
+}
+
+void test_move_operator()
+{
+    Zbior a(10, 0.0, 1.0);
+
+    // zachowujemy adres tablicy z 'a'
+    std::vector<double> kopiaA = static_cast<std::vector<double>>(a);
+    double pierwszy = kopiaA[0];
+
+    Zbior b = std::move(a);
+
+    // 'a' musi być wyzerowany
+    assert(a.size() == 0);
+
+    // wartości muszą zostać przeniesione
+    std::vector<double> kopiaB = static_cast<std::vector<double>>(b);
+    assert(kopiaB[0] == pierwszy);
+
+    std::cout << "TEST MOVE: OK\n";
+}
+struct NieZawieraX
+{
+    int x;
+    NieZawieraX(int val) : x(val) {}
+
+    bool operator()(const Zbior& z) const
+    {
+        for (size_t i = 0; i < z.size(); i++)
+            if (z[i] == x)
+                return false;
+        return true;
+    }
+};
+
+std::array<Zbior, 20> T = []{
+    std::array<Zbior, 20> arr;
+    std::random_device rd;
+    std::uniform_int_distribution<int> licz(10, 40);
+
+    for (size_t i = 0; i < 20; i++)
+        arr[i] = Zbior(licz(rd), -5.0, 5.0);  // losowe granice
+
+    return arr;
+}();
+
+
+void zadanie_7()
+{
+    NieZawieraX pred(3);   // np. filtrujemy te zbiory, które nie zawierają wartości 3
+
+    // 7a) filtracja
+    std::vector<Zbior> tylko_te;
+    std::copy_if(T.begin(), T.end(), std::back_inserter(tylko_te), pred);
+
+    // 7b) tworzymy wektor liczebności
+    std::vector<size_t> liczebnosci;
+    liczebnosci.reserve(T.size());
+
+    std::transform(T.begin(), T.end(), std::back_inserter(liczebnosci),
+        [](const Zbior& z) { return z.size(); });
+
+    // wypisanie
+    for (size_t n : liczebnosci)
+        std::cout << n << " ";
+    std::cout << "\n";
+}
